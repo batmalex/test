@@ -1,0 +1,84 @@
+import subprocess
+import re
+import os
+import uuid
+import shutil
+import datetime
+
+
+# host_name = 'localhost'
+hosts = ['localhost']
+port = '27017'
+dump_path = '/tmp/pydump/'
+quota = 10
+
+# Получает список хостов из Configmap-файла
+def get_hosts(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for host in f:
+            hosts += host
+    return hosts
+
+# Создает дамп
+def create_dump(host_name, port, dump_path, session_id):
+    dump_path = os.path.join(dump_path, host_name, session_id)
+    if not os.path.exists(dump_path):
+        os.makedirs(dump_path)
+    dump_log = subprocess.run(['mongodump', '-verbose', '--host', host_name, '--port', port, '--out', dump_path],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+    result = check_log(str(dump_log))
+    print(dump_log.decode('utf-8'))
+    return result, dump_log
+
+# Проверяет лог для созданного дампа
+def check_log(log):
+    errors = re.findall('Error', log)
+    if not errors:
+        result = True
+    else:
+        result = False
+    return result
+
+# Создает лог в формате для Kibana
+def write_log(session_id, timestamp, host_name, result, message, dump_time):
+    log_file_name = ('dump_log_{0}.txt'.format(str(timestamp.date())))
+    log_file = os.path.join(dump_path, log_file_name)
+    log = '{{"session_id":{0}, "timestamp":{1}, "host_name":{2}, "result":{3}, "dump_time":{4}, "message":{5}}} \n'\
+        .format(session_id, timestamp, host_name, str(int(result)), str(dump_time), message)
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(log)
+
+# Удаляет дамп, для случая бекапа с ошибкой
+def clean_dump(dump_path, host_name,  session_id):
+    full_path = os.path.join(dump_path, host_name, session_id)
+    shutil.rmtree(full_path)
+    print('deleted {0}'.format(full_path))
+
+# Очищает диск от лишних дампов. Число созраненных дампов не более quouta
+def delete_old_dumps(dump_path, host_name, quota):
+    dir_list = []
+    full_path = os.path.join(dump_path, host_name)
+
+    for dir in os.listdir(full_path):
+        dir_path = os.path.join(full_path, dir)
+        dir_create_time = os.path.getmtime(dir_path)
+        dir_list.append((dir_create_time, dir_path))
+    for item in sorted(dir_list, reverse=True)[quota:]:
+        shutil.rmtree(item[1])
+        print('removed {0}'.format(item[1]))
+
+if __name__ == "__main__":
+    # hosts = get_hosts(file_path)
+    session_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.now()
+
+    for host in hosts:
+        dump_created = create_dump(host, port, dump_path, session_id)
+        dump_time = datetime.datetime.now()
+        if not dump_created[0]:
+            clean_dump(dump_path, host, session_id)
+        write_log(session_id=session_id, timestamp=timestamp, host_name=host, result=dump_created[0],
+                  message=dump_created[1], dump_time=dump_time)
+
+    for host in hosts:
+        delete_old_dumps(dump_path, host, quota)

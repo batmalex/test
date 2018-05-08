@@ -1,0 +1,23 @@
+2018-05-08T15:16:57.762+0000	will listen for SIGTERM, SIGINT, and SIGKILL
+2018-05-08T15:16:57.764+0000	found databases: admin, config, local, test_database
+2018-05-08T15:16:57.765+0000	enqueued collection 'admin.system.version'
+2018-05-08T15:16:57.765+0000	will not dump system collection 'config.system.sessions'
+2018-05-08T15:16:57.765+0000	enqueued collection 'test_database.test_collection'
+2018-05-08T15:16:57.765+0000	dump phase I: metadata, indexes, users, roles, version
+2018-05-08T15:16:57.765+0000		reading indexes for `test_database.test_collection`
+2018-05-08T15:16:57.766+0000		reading indexes for `admin.system.version`
+2018-05-08T15:16:57.766+0000	writing admin.system.version to 
+2018-05-08T15:16:57.766+0000	counted 1 document in admin.system.version
+2018-05-08T15:16:57.766+0000	done dumping admin.system.version (1 document)
+2018-05-08T15:16:57.766+0000	dump phase II: regular collections
+2018-05-08T15:16:57.766+0000	finalizing intent manager with longest task first prioritizer
+2018-05-08T15:16:57.766+0000	dumping up to 2 collections in parallel
+2018-05-08T15:16:57.766+0000	starting dump routine with id=1
+2018-05-08T15:16:57.766+0000	writing test_database.test_collection to 
+2018-05-08T15:16:57.766+0000	starting dump routine with id=0
+2018-05-08T15:16:57.766+0000	ending dump routine with id=0, no more work to do
+2018-05-08T15:16:57.767+0000	counted 79042 documents in test_database.test_collection
+2018-05-08T15:16:57.902+0000	done dumping test_database.test_collection (79042 documents)
+2018-05-08T15:16:57.902+0000	ending dump routine with id=1, no more work to do
+2018-05-08T15:16:57.902+0000	dump phase III: the oplog
+2018-05-08T15:16:57.902+0000	finishing dump

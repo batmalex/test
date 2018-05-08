@@ -24,7 +24,7 @@ def create_dump(host_name, port, dump_path, session_id):
     dump_path = os.path.join(dump_path, host_name, session_id)
     if not os.path.exists(dump_path):
         os.makedirs(dump_path)
-    dump_log = subprocess.run(['mongodump', '-verbose', '--host', host_name, '--port', port, '--out', dump_path],
+    dump_log = subprocess.run(['mongodump', '-vvvvv', '--host', host_name, '--port', port, '--out', dump_path],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
     result = check_log(str(dump_log))
     print(dump_log.decode('utf-8'))
@@ -32,8 +32,14 @@ def create_dump(host_name, port, dump_path, session_id):
 
 # Проверяет лог для созданного дампа
 def check_log(log):
-    errors = re.findall('Error', log)
-    if not errors:
+    conn = (r"connected[\s]+connection![\s]+")
+    dump = (r"([\d]+)[\s]+documents")
+    err = (r"error")
+    find_errors = re.search(err, log, re.I)
+    test_conn = re.search(conn, log, re.I)
+    test_dump = re.findall(dump, log, re.I)
+
+    if not find_errors and test_conn and len(test_dump) > 1:
         result = True
     else:
         result = False

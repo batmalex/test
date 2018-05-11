@@ -4,36 +4,53 @@ import os
 import uuid
 import shutil
 import datetime
-
+import json
 
 # host_name = 'localhost'
-hosts = ['localhost']
-port = '27017'
-dump_path = '/tmp/pydump/'
-quota = 10
+# hosts = ['mongo-node1', 'localhost']
+# dump_path = '/tmp/pydump/'
+# quota = 10
+
+# os.environ['CRON_DUMP_PATH'] = '/data/persistent/'
+# os.environ['CRON_CONF_PATH'] = '/etc/cronconf/'
+# os.environ['CRON_DUMP_QUOTA'] = '10'
+# os.environ['CRON_DB_PORT'] = '27017'
+
+file_path = os.path.join(os.environ['CRON_CONF_PATH'], 'dblist.json')
+dump_path = os.environ['CRON_DUMP_PATH']
+dump_quota = int(os.environ['CRON_DUMP_QUOTA'])
+db_port = os.environ['CRON_DB_PORT']
 
 # Получает список хостов из Configmap-файла
 def get_hosts(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for host in f:
-            hosts += host
+    hosts = []
+    with open(file_path, 'r') as f:
+        db_list = json.loads(f.read())
+        print(db_list)
+        for host in db_list:
+            if db_list[host]['dumping'] == "True":
+                hosts.append(host)
+        print(hosts)
     return hosts
 
 # Создает дамп
-def create_dump(host_name, port, dump_path, session_id):
+def create_dump(host_name, db_port, dump_path, session_id):
     dump_path = os.path.join(dump_path, host_name, session_id)
     if not os.path.exists(dump_path):
         os.makedirs(dump_path)
-    dump_log = subprocess.run(['mongodump', '-vvvvv', '--host', host_name, '--port', port, '--out', dump_path],
+        # print('NEW_PATH {0} {1}'.format(os.path.exists(dump_path), dump_path))
+    dump_log = subprocess.run(['mongodump', '-vvvvv', '--host', host_name, '--port', db_port, '--out', dump_path],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
-    result = check_log(str(dump_log))
-    print(dump_log.decode('utf-8'))
+    result = check_log(dump_log.decode('utf-8'))
+    # print(dump_log.decode('utf-8'))
     return result, dump_log
 
 # Проверяет лог для созданного дампа
 def check_log(log):
-    conn = (r"connected[\s]+connection![\s]+")
-    dump = (r"([\d]+)[\s]+documents")
+    # conn = (r"connected[\s]+connection![\s]+")
+    # dump = (r"([\d]+)[\s]+documents")
+    conn = (r"found databases:")
+    dump = (r"done dumping[\s]+([\w]+)")
     err = (r"error")
     find_errors = re.search(err, log, re.I)
     test_conn = re.search(conn, log, re.I)
@@ -61,7 +78,7 @@ def clean_dump(dump_path, host_name,  session_id):
     print('deleted {0}'.format(full_path))
 
 # Очищает диск от лишних дампов. Число созраненных дампов не более quouta
-def delete_old_dumps(dump_path, host_name, quota):
+def delete_old_dumps(dump_path, host_name, dump_quota):
     dir_list = []
     full_path = os.path.join(dump_path, host_name)
 
@@ -69,22 +86,27 @@ def delete_old_dumps(dump_path, host_name, quota):
         dir_path = os.path.join(full_path, dir)
         dir_create_time = os.path.getmtime(dir_path)
         dir_list.append((dir_create_time, dir_path))
-    for item in sorted(dir_list, reverse=True)[quota:]:
+    for item in sorted(dir_list, reverse=True)[dump_quota:]:
         shutil.rmtree(item[1])
         print('removed {0}'.format(item[1]))
 
 if __name__ == "__main__":
-    # hosts = get_hosts(file_path)
+    dump_path = os.path.join(dump_path, 'mongodump')
+    print(dump_path)
+    if not os.path.exists(dump_path):
+        os.makedirs(dump_path)
+    hosts = get_hosts(file_path)
     session_id = str(uuid.uuid4())
     timestamp = datetime.datetime.now()
 
     for host in hosts:
-        dump_created = create_dump(host, port, dump_path, session_id)
+        dump_created = create_dump(host, db_port, dump_path, session_id)
         dump_time = datetime.datetime.now()
+        print(dump_created)
         if not dump_created[0]:
             clean_dump(dump_path, host, session_id)
         write_log(session_id=session_id, timestamp=timestamp, host_name=host, result=dump_created[0],
                   message=dump_created[1], dump_time=dump_time)
 
     for host in hosts:
-        delete_old_dumps(dump_path, host, quota)
+        delete_old_dumps(dump_path, host, dump_quota)

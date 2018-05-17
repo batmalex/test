@@ -1,8 +1,17 @@
 import gitlab
 import cfg
+import json
 
 gl = gitlab.Gitlab('https://gitlab.gitlab.bcs.ru', cfg.token, api_version=4)
 gl.auth()
+
+def get_working_mode():
+    working_mode = input('Для выбора диалогового режима нажмите Enter или укажите "f" для загрузки конфигураци из файла :')
+    if working_mode.lower() == 'f':
+        user_mode = False
+    else:
+        user_mode = True
+    return user_mode
 
 
 def get_group_name():
@@ -88,49 +97,97 @@ def print_all_tags():
         print('..возникло исключение...')
 
 
-def set_tag(tag_name, tag_message, projects):
-    project_id = input(
-        'Укажите номер проекта (Prj_Id) либо нажмите (enter) для пометки всех проектов: ').strip().lower()
-    if project_id:
-        project = gl.projects.get(project_id)
-        tag_finded = project.tags.get(str(tag_name), '')
-        if not tag_finded:
-            tag = project.tags.create({'tag_name': tag_name, 'ref': 'master', 'message': tag_message})
-            print('Для проекта {0:.<40}, тег {1} добавлен'.format(project.name, tag))
-        else:
-            print('Для проекта {0:.<40}, тег {1:<12} был установлен ранее;'.format(project.name, tag_name))
+def set_tag(tag_name, tag_message, project):
+    tag_finded = project.tags.get(str(tag_name))
+    if not tag_finded:
+        tag = project.tags.create({'tag_name': tag_name, 'ref': 'master', 'message': tag_message})
+        print('Для проекта {0:.<40}, тег {1} добавлен'.format(project.name, tag))
     else:
-        for item in projects:
-            project = gl.projects.get(item.id)
-            if not project.tags.get(str(tag_name)):
-                project.tags.create({'tag_name': tag_name, 'ref': 'master', 'message': tag_message})
-                print('Для проекта {0:.<40}, тег {1:<12} добавлен; {2}'.format(tag_name, item.name, tag_message))
-            else:
-                print('Для проекта {0:.<40}, тег {1:<12} был установлен ранее;'.format(tag_name, item.name))
+        print('Для проекта {0:.<40}, тег {1:<12} был установлен ранее;'.format(project.name, tag_name))
+
+
+def get_projects(file_path):
+    project_list = []
+    with open(file_path, 'r') as f:
+        parced_file = json.loads(f.read())
+        print(parced_file)
+        for item in parced_file['projects']:
+            if item['tagging'].lower() == "true":
+                project_list.append(item.get('project_id'))
+        # group_name = parced_file['group_name']
+        print(project_list)
+    return project_list
+
+# def set_tag(tag_name, tag_message, projects):
+#     project_id = input(
+#         'Укажите номер проекта (Prj_Id) либо нажмите (enter) для пометки всех проектов: ').strip().lower()
+#     if project_id:
+#         project = gl.projects.get(project_id)
+#         tag_finded = project.tags.get(str(tag_name), '')
+#         if not tag_finded:
+#             tag = project.tags.create({'tag_name': tag_name, 'ref': 'master', 'message': tag_message})
+#             print('Для проекта {0:.<40}, тег {1} добавлен'.format(project.name, tag))
+#         else:
+#             print('Для проекта {0:.<40}, тег {1:<12} был установлен ранее;'.format(project.name, tag_name))
+#     else:
+#         for item in projects:
+#             project = gl.projects.get(item.id)
+#             if not project.tags.get(str(tag_name)):
+#                 project.tags.create({'tag_name': tag_name, 'ref': 'master', 'message': tag_message})
+#                 print('Для проекта {0:.<40}, тег {1:<12} добавлен; {2}'.format(tag_name, item.name, tag_message))
+#             else:
+#                 print('Для проекта {0:.<40}, тег {1:<12} был установлен ранее;'.format(tag_name, item.name))
 
 
 if __name__ == "__main__":
-    group = get_group_name()
+    user_mode = get_working_mode()
 
-    if group:
-        projects = group.projects.list(all=True, order_by='name', sort='asc')
-        print('Всего проектов в группе {1}: {0} '.format(len(projects), group.name))
-        print_all_tags()
+    if not user_mode:
         tag_name = get_tag_name()
         tag_message = get_tag_message()
+        project_list = get_projects('./project_list.json')
+        for project_id in project_list:
+            project = gl.projects.get(project_id)
+            set_tag(tag_name, tag_message, project)
+    else:
+        group = get_group_name()
+        if group:
+            projects = group.projects.list(all=True, order_by='name', sort='asc')
+            print('Всего проектов в группе {1}: {0} '.format(len(projects), group.name))
+            print_all_tags()
 
-        if tag_name:
-            set_tag(tag_name, tag_message, projects)
-        else:
-            print('Указаны некорректные данные для tagname')
-            
-def get_hosts(file_path):
-    hosts = []
-    with open(file_path, 'r') as f:
-        db_list = json.loads(f.read())
-        print(db_list)
-        for host in db_list:
-            if db_list[host]['dumping'] == "True":
-                hosts.append(host)
-        print(hosts)
-    return hosts
+            # tag_name = get_tag_name()
+            # tag_message = get_tag_message()
+            #
+            # if tag_name:
+            #     set_tag(tag_name, tag_message, project)
+            # else:
+            #     print('Указаны некорректные данные для tagname')
+
+#
+# prj_list = [{'project_name': 4, 'tagging': "true", 'project_id': prj_id} for prj_id in 'qwe']
+#
+# print(prj_list)
+#
+# {
+#   "group_name": "perseus",
+#   "working_mode": "deatached",
+#   "projects": [
+#     {
+#       "project_name": "adminer",
+#       "project_id": "12",
+#       "tagging": "true"
+#     },
+#     {
+#       "project_name": "gui",
+#       "project_id": "15",
+#       "tagging": "false"
+#     },
+#     {
+#       "project_name": "web",
+#       "project_id": "100500",
+#       "tagging": "true"
+#     }
+#   ]
+# }
+

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-conf
+  namespace: default
+data:
+  pipeline.conf: |-
+      input {
+      file {
+            path =>["/tmp/logs/*.log"]
+            start_position => "end"
+            stat_interval => 1
+            discover_interval => 30
+            codec => multiline {
+              pattern => '^\[%{TIMESTAMP_ISO8601:TIMESTAMP}\]'
+              negate => true
+              what => "previous"
+              }
+            }
+          }
+      filter {
+         grok {
+              match => { "message" => "^%{TIMESTAMP_ISO8601:TIMESTAMP}%{SPACE}%{LOGLEVEL:LEVEL}%{SPACE}(?<ERRORMESSAGE>(.|\r|\n)*)"}
+         }
+      }
+      output {
+        elasticsearch {
+          hosts => ["es-master:9200"]
+          index => "logs-%{+YYYY.MM.dd}"
+          }
+        }

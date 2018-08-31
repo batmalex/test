@@ -1,0 +1,158 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "9108"
+    prometheus.io/scrape: "true"
+  labels:
+    name: mongo
+  name: mongodb-service
+  namespace: perseus
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+    - name: metrics
+      port: 9216
+      targetPort: metrics
+  selector:
+    role: mongo
+
+apiVersion: apps/v1beta2
+kind: StatefulSet
+metadata:
+  name: mongod
+  namespace: perseus
+spec:
+  selector:
+    matchLabels:
+      app: mongo
+  serviceName: mongodb-service
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: mongo
+        environment: test
+        replicaset: MainRepSet
+    spec:
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: secrets-volume
+          secret:
+            secretName: shared-bootstrap-data
+            defaultMode: 256
+        - name: workdir
+          emptyDir: {}
+      containers:
+        - name: mongod-container
+          image: mongo:3.6.7
+          command:
+            - "numactl"
+            - "--interleave=all"
+            - "mongod"
+            - "--wiredTigerCacheSizeGB"
+            - "0.25"
+            - "--bind_ip"
+            - "0.0.0.0"
+            - "--replSet"
+            - "MainRepSet"
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: secrets-volume
+              readOnly: true
+              mountPath: /etc/secrets-volume
+            - name: mongodb-persistent-storage-claim
+              mountPath: /data/db
+        - name: mongo-exporter
+          image: ssalaues/mongodb-exporter
+          imagePullPolicy: Always
+          env:
+          - name: MONGODB_URL
+            value: "mongodb://localhost:27017"
+          volumeMounts:
+            - name: workdir
+              mountPath: /work-dir
+              readOnly: true
+          ports:
+            - name: metrics
+              containerPort: 9216
+          resources: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-persistent-storage-claim
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+
+
+conn = MongoClient('mongodb://mongodb-service/?replicaSet=MainRepSet', 27017)
+
+import pymongo
+from pymongo import MongoClient
+import datetime
+
+active = True
+connect_iteration = 0
+max_range = 5000
+i = 0
+
+while active:
+    try:
+        connect_iteration += 1
+        conn = MongoClient('mongodb://mongodb-service/', 27017)
+
+        db = conn.test_database
+        collection = db.test_collection
+        c = conn.list_database_names()
+
+        rep_p = conn.primary
+        print('prim', rep_p)
+        rep_s = conn.secondaries
+        print('sec', rep_s)
+        print('inf', conn.server_info())
+        # print('db_list: ', c)
+
+        for i in range(i, max_range):
+            if i % 1000 == 0 or i == max_range - 1:
+                cnt = collection.find().count()
+                print('loop iteration: {0} total items in db: {1}'.format(i, cnt))
+
+            d = datetime.datetime.utcnow().isoformat()
+            collection.insert_one({'name': 'Ivan', 'secondname': 'Petr', 'date': d, 'position': i})
+
+            if i == max_range - 1:
+                active = False
+    except pymongo.errors.NotMasterError:
+        print('exception: NotMasterError ', connect_iteration)
+        print('interrupted on loop iteration:', i)
+
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongo-restore
+  namespace: perseus
+  labels:
+    app: mongodb2
+spec:
+  containers:
+  - name: mng-nd-1
+    image: py-mongo:master
+    command:
+      - sleep
+      - "360000"
+    imagePullPolicy: Always
+  restartPolicy: Never

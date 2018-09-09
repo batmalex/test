@@ -4,13 +4,13 @@ import datetime
 import os
 
 
-
 os.environ['NUMBER_OF_ITERATION'] = '50000'
 os.environ['DATABASE_PATH'] = 'mongodb://mongodb-service/'
 os.environ['DATABASE_PORT'] = '27017'
 os.environ['TEST_DATABASE_NAME'] = 'test_database'
 os.environ['TEST_COLLECTION_NAME'] = 'test_collection'
 os.environ['MONGO_REPLICA_SET_NAME'] = 'MainRepSet'
+os.environ['TIME_LIMITS_FOR_CHECK'] = '120'
 
 
 number_of_iteration = int(os.environ['NUMBER_OF_ITERATION'])
@@ -19,178 +19,55 @@ database_port = int(os.environ['DATABASE_PORT'])
 database_name = os.environ['TEST_DATABASE_NAME']
 collection_name = os.environ['TEST_COLLECTION_NAME']
 replicaset_name = os.environ['MONGO_REPLICA_SET_NAME']
-
-
-active = True
-connect_iteration = 0
-max_range = number_of_iteration
-i = 0
-
-
-start_time = datetime.datetime.utcnow().isoformat()
-
-
-conn = MongoClient(host=database_path, replicaset=replicaset_name, port=database_port)
-db = conn[database_name]
-collection = db[collection_name]
-collection.remove({})
-
-
-while active:
-    try:
-        d = datetime.datetime.utcnow().isoformat()
-        connect_iteration += 1
-        conn = MongoClient(host=database_path, replicaset=replicaset_name, port=database_port)
-        c = conn.list_database_names()
-        print(c)
-        print('{0} {1:<8} Connecting to master...'.format(d, 'INFO'))
-
-        db = conn[database_name]
-        collection = db[collection_name]
-        # c = conn.list_database_names()
-
-        for i in range(i, max_range):
-            d = datetime.datetime.utcnow().isoformat()
-            collection.insert_one({'name': 'Ivan', 'secondname': 'Petr', 'date': d, 'position': i})
-
-            if (i % 10000 == 0 and i != 0) or i == max_range - 1:
-                cnt = collection.find().count()
-                print('{0} {1:<8} Inserted documents in db: {2:<8} Total documents in db: {3}'.format(d, 'INFO', i + 1, cnt))
-
-            if i == max_range - 1:
-                active = False
-
-    except pymongo.errors.AutoReconnect:
-        print('{0} {1} exception: auto-reconnect error. Interrupted on loop iteration {2}. Total connection attempts: {3} '.format(d, 'ERROR', i + 1, connect_iteration))
-        
-        
-        
-        
-        
-        
-        
-        
-#####################################
-
-
-
-
-
-
-import pymongo
-from pymongo import MongoClient
-import datetime
-import os
-
-
-
-os.environ['NUMBER_OF_ITERATION'] = '50000'
-os.environ['DATABASE_PATH'] = 'mongodb://mongodb-service/'
-os.environ['DATABASE_PORT'] = '27017'
-os.environ['TEST_DATABASE_NAME'] = 'test_database'
-os.environ['TEST_COLLECTION_NAME'] = 'test_collection'
-os.environ['MONGO_REPLICA_SET_NAME'] = 'MainRepSet'
-
-
-number_of_iteration = int(os.environ['NUMBER_OF_ITERATION'])
-database_path = os.environ['DATABASE_PATH']
-database_port = int(os.environ['DATABASE_PORT'])
-database_name = os.environ['TEST_DATABASE_NAME']
-collection_name = os.environ['TEST_COLLECTION_NAME']
-replicaset_name = os.environ['MONGO_REPLICA_SET_NAME']
-
+time_limits = os.environ['TIME_LIMITS_FOR_CHECK']
 
 active = True
 connect_iteration = 0
 read_all_docs = False
-
-total_reads = 0
-total_reads_old = 0
-old_cnt = 0
-permanent_state = 0
-start_time = datetime.datetime.utcnow()
+time_elapsed = False
+persistent_iteration_count = 0
+cnt_old = cnt = 0
+start_time = iter_time = datetime.datetime.utcnow()
 
 
 while active:
     try:
-        d = datetime.datetime.utcnow().isoformat()
+        iter_time = datetime.datetime.utcnow().isoformat()
         connect_iteration += 1
         conn = MongoClient(host=database_path, replicaset=replicaset_name, port=database_port, readPreference='secondaryPreferred')
-        print('{0} {1:<8} Connecting to slave...'.format(d, 'INFO'))
+        print('{0} {1:<8} Connecting to slave...'.format(iter_time, 'INFO'))
 
         db = conn[database_name]
         collection = db[collection_name]
+
+        last_iter_time = start_time
         # c = conn.list_database_names()
 
-        while not read_all_docs:
-            for i in range(1000):
-                d = datetime.datetime.utcnow()
-                cnt = collection.find().count()
-                total_reads += 1
+        while not read_all_docs or not time_elapsed:
+            iter_time = datetime.datetime.utcnow()
+            cnt = collection.find().count()
 
-                if cnt % 1000 == 0 and i != 0 and old_cnt != cnt:
-                    cnt_delta = cnt - old_cnt
-                    old_cnt = cnt
-                    if cnt_delta == 0:
-                        permanent_state += (d - start_time).microseconds / 1000000
-                    else:
-                        permanent_state = 0
-
-                    delta = (d - start_time).microseconds / 1000000
-                    reed_ps = round(((total_reads - total_reads_old) / delta), 2)
-                    print('{0} {1:<8} Read documents in db: {2:<8} Total reads: {3} p/s'.format(d, 'INFO', cnt, reed_ps))
-                    start_time = d
-                    total_reads_old = total_reads
-
-            # sucessfily read all documents or cnt == number_of_iteration
+            if cnt != cnt_old:
+                cnt_old = cnt
+                last_iter_time = iter_time
+            else:
+                delta = (iter_time - last_iter_time).microseconds / 1000000
+                if delta >= 2 + persistent_iteration_count * 2:
+                    print('{0} {1:<8} At least {2:<10} seconds the number of documents in database is persistent. '
+                          'Total documents in db: {3}'.format(iter_time, 'WARNING', round(delta, 2), cnt))
+                    persistent_iteration_count += 1
 
             if cnt >= number_of_iteration:
-                print('{0} {1:<8} Read documents in db: {2:<8} Total documents in db: {3}'.format(d, 'INFO', i + 1, cnt))
-
                 read_all_docs = True
-                active = False
+                print('{0} {1:<8} All checks completed successfully. The number of inserted docs equals to the number '
+                      'of total docs in db.  Total documents in db: {2}'.format(iter_time, 'INFO', cnt))
+
+            elif (iter_time - start_time).seconds >= time_limits:
+                time_elapsed = True
+                print('{0} {1:<8} Test checks failed. The number of inserted docs not equals to the number of total '
+                      'docs in db.  Total documents in db: {2}. '
+                      'Total inserted documents: {3}'.format(iter_time, 'INFO', cnt, number_of_iteration ))
 
     except pymongo.errors.AutoReconnect:
-        print('{0}  {1} exception: auto-reconnect error. Interrupted on loop iteration {2}. Total connection attempts {3}: '.format(d, 'ERROR', i + 1, connect_iteration))
-
-# try:
-#     d = datetime.datetime.utcnow().isoformat()
-#     connect_iteration += 1
-#     conn = MongoClient(host=database_path, replicaset=replicaset_name, port=database_port,
-#                        readPreference='secondaryPreferred')
-#     print('{0} {1:<8} Connecting to slave...'.format(d, 'INFO'))
-#
-#     db = conn[database_name]
-#     collection = db[collection_name]
-#     # c = conn.list_database_names()
-#
-#     while not read_all_docs:
-#         for i in range(2000):
-#             d = datetime.datetime.utcnow()
-#             cnt = collection.find().count()
-#             total_reads += 1
-#             if (cnt % 10000 == 0 and i != 0):
-#                 break
-#         # число записей, которое изменилось
-#         cnt_delta = cnt - old_cnt
-#         old_cnt = cnt
-#
-#         if (cnt % 10000 == 0 and i != 0) or cnt_delta == 0:
-#             if cnt_delta == 0:
-#                 permanent_state += (d - start_time).microseconds / 1000000
-#             else:
-#                 permanent_state = 0
-#
-#             delta = (d - start_time).microseconds / 1000000
-#             reed_ps = round(((total_reads - total_reads_old) / delta), 2)
-#             print('{0} {1:<8} Read documents in db: {2:<8} Total reads: {3} p/s'.format(d, 'INFO', cnt, reed_ps))
-#             start_time = d
-#             total_reads_old = total_reads
-#
-#     # sucessfily read all documents or cnt == number_of_iteration
-#
-#     if cnt >= number_of_iteration:
-#         print('{0} {1:<8} Read documents in db: {2:<8} Total documents in db: {3}'.format(d, 'INFO', i + 1, cnt))
-#
-#         read_all_docs = True
-#         active = False
+        print('{0} {1:<8} exception: auto-reconnect error. Interrupted while reading {2} documents. '
+              'Total connection attempts: {3}'.format(iter_time, 'ERROR', cnt, connect_iteration))

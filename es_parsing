@@ -1,0 +1,72 @@
+import requests
+import json
+import re
+import collections
+
+url = 'http://localhost:9200/new_index/_search'
+header = {'Content-Type': 'application/json'}
+
+fetched_field = 'positions'
+sorted_field = '_id'
+package_size = 1000
+# Словарь для собирания всех искомых значений
+item_list = collections.defaultdict(int)
+
+# re_pattern = (r"how do to does: (?P<index>[\w\-]+)")
+re_pattern = (r"\d{1}(?P<index>[\d]{1})")
+re_compile = re.compile(pattern=re_pattern)
+
+# Тело запроса для проверки наличия хотя бы одного документа в выборке
+request_body = {
+            "size": 1,
+            "_source": [fetched_field],
+            "sort": [
+                {sorted_field: "desc"}
+            ]
+        }
+
+# Парсим пакет документов индекса
+def parse_response(text):
+    last_sorted_value = None
+    response = json.loads(text)
+    # Список найденных объектов в пакете поиска
+    documents_list = response.get("hits", "").get("hits", "")
+    # Парсим документы по одному
+    for document in documents_list:
+        fetched_field_data = document.get('_source', '').get(fetched_field)
+        # Получаем список sort_value для метода ES search_after
+        last_sorted_value = document.get('sort', '')
+        searched_item = find_item(fetched_field_data)
+        if searched_item:
+            item_list[searched_item] += 1
+        print(last_sorted_value, fetched_field_data)
+    return last_sorted_value
+
+# Ищем значение для сохраняющей группы регулярки по строке из поля документа
+def find_item(text):
+    finded_item_data = None
+    finded_item = re_compile.search(str(text))
+    if finded_item:
+        finded_item_data = finded_item.group("index")
+    print('f ***', finded_item_data)
+    return finded_item_data
+
+
+if __name__ == "__main__":
+    r = requests.post(url=url, data=json.dumps(request_body), headers=header)
+    last_sorted = parse_response(r.text)
+
+    while last_sorted:
+        body = {
+            "size": package_size,
+            "_source": [fetched_field],
+            "search_after": last_sorted,
+            "sort": [
+                {sorted_field: "desc"}
+            ]
+        }
+
+        r = requests.post(url=url, data=json.dumps(body), headers=header)
+        last_sorted = parse_response(r.text)
+
+    print(json.dumps(item_list))
